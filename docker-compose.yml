@@ -65,12 +65,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    restart: "no"
+    restart: unless-stopped
     networks:
       - data
 
   # The Bot's computer is long-lived so browser sessions remain signed in across turns.
   agent-computer:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: agent-computer/Dockerfile
@@ -180,6 +181,7 @@ services:
   # root-equivalent on the host, so only the supervisor holds it and only exposes Bot-level verbs.
   # The SPIRE agent mounts the socket read-only to attest workloads and creates nothing.
   supervisor:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: supervisor/Dockerfile
@@ -257,6 +259,7 @@ services:
 
   # The built-in Bot is an AG-UI endpoint registered the same way as a customer-provided Bot.
   agent-bot:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: agent-bot/Dockerfile
@@ -340,6 +343,7 @@ services:
 
   # The same Bot behavior on a framework, exposed as another AG-UI endpoint and registry row.
   agent-langgraph:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: agent-langgraph/Dockerfile
