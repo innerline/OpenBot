@@ -1990,6 +1990,16 @@ export function mountCopilotRuntime(
    * write is scoped to rows that person uploaded. Appended last. Absent means nothing is recorded.
    */
   markAttachmentsSentForActor?: (actorId: string) => MarkAttachmentsSent,
+  /**
+   * Where to mount the plain AG-UI door, as a base path such as "/api/agui".
+   *
+   * Absent leaves this deployment with the Intelligence route alone, which is every caller it has
+   * on its own origin. Set, a second runtime is built beside the main one that answers a run with
+   * the AG-UI event stream over the response — the protocol shape a server-side AG-UI `HttpAgent`
+   * speaks (OpenDots' remote Dot lane). See the block beside that runtime for why such a caller
+   * cannot use the Intelligence route and must not be pointed at it.
+   */
+  aguiBasePath?: string,
 ) {
   const { intelligence } = config.runtime;
 
@@ -2115,8 +2125,63 @@ export function mountCopilotRuntime(
     ) as never,
   });
 
+  /*
+   * The plain AG-UI door on the same Bots, for callers that speak the protocol's HTTP shape
+   * rather than the Intelligence platform's.
+   *
+   * A second runtime, deliberately NOT in Intelligence mode: it holds no platform client, creates
+   * and locks no threads, and answers a run with the AG-UI event stream on the response itself.
+   * That is the only shape a server-side AG-UI `HttpAgent` (OpenDots' remote Dot lane) can
+   * consume. The Intelligence runtime above cannot serve such a caller, twice over: it would
+   * try to `getOrCreateThread` for a thread another Intelligence runtime already created — the
+   * platform makes a thread id globally unique and owned by exactly one (user, agent) pair, so
+   * the same id under two runtimes collides as 409-then-404 and every turn dies "Failed to
+   * initialize thread" — and even past that, its run answer is the join-token envelope, not an
+   * event stream, so nothing would stream back to a plain AG-UI client.
+   *
+   * The SAME agent resolution as the main runtime, so a Bot reached through this door runs with
+   * the same tools, standing role, and signed-run treatment a person's own conversation gets.
+   * Built again rather than shared: the runtime reads the resolver per request and the two
+   * runtimes never exchange agents, and the resolver is a factory over the same closures — the
+   * cost of the second build is one object, not a second copy of anything it resolves.
+   *
+   * NOT in front of the main runtime and not a replacement for it: no route of this one answers
+   * on the Intelligence basePath, and no Intelligence caller can reach it, because the handler
+   * carries its own basePath and the two never overlap.
+   */
+  const aguiRuntime = aguiBasePath
+    ? new CopilotRuntime({
+        identifyUser,
+        agents: createRequestAgents(
+          identifyActor,
+          loadAgents,
+          model,
+          resolveModelApiKey,
+          stallGuard,
+          loadToolsForActor,
+          signRunForActor,
+          config.computer ? COMPUTER_GUIDANCE : undefined,
+          loadVendors,
+          selectionForActor,
+          agentFetch,
+          handoffForActor,
+          loadInstructionsForActor,
+          loadAttachmentForActor,
+          markAttachmentsSentForActor,
+        ) as never,
+      })
+    : undefined;
+
   return {
     handler: createCopilotHonoHandler({ runtime, basePath }),
+    ...(aguiRuntime && aguiBasePath
+      ? {
+          aguiHandler: createCopilotHonoHandler({
+            runtime: aguiRuntime,
+            basePath: aguiBasePath,
+          }),
+        }
+      : {}),
     /**
      * How to reach the platform's runner, exactly as the runtime reaches it.
      *

@@ -949,6 +949,10 @@ const copilotRuntime = mountCopilotRuntime(
   // And that those files went out in a send, written by the person who sent them and only for rows
   // they uploaded. See markAttachmentsSentForActor.
   markAttachmentsSentForActor,
+  // The plain AG-UI door on the same Bots, for server-side AG-UI callers (OpenDots' remote Dot
+  // lane) that need the event stream on the response rather than the Intelligence join-token
+  // envelope. See the block in mountCopilotRuntime for why they cannot use the Intelligence route.
+  "/api/agui",
 );
 
 /**
@@ -1259,6 +1263,19 @@ const app = createApp(
     return { text, isError: text.startsWith(REFUSAL_MARKER) };
   },
 );
+
+/*
+ * The plain AG-UI door from mountCopilotRuntime, mounted on the app.
+ *
+ * Mounted here rather than threaded through createApp's positional parameters, which are appended
+ * to, never inserted into, and already the longest list in this file. Registered after createApp
+ * returns — so after every /api route declared inside it — which orders it behind nothing it could
+ * shadow: no other route claims /api/agui, the static catch-all inside createApp answers GET with
+ * the app's HTML for non-/api paths only, and this door's routes are POSTs on /api/agui.
+ */
+if (copilotRuntime.aguiHandler) {
+  app.route("/", copilotRuntime.aguiHandler);
+}
 
 /**
  * The live screen, proxied.
