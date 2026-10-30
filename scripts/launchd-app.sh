@@ -26,6 +26,11 @@ setting() {
 }
 
 APP_PORT="$(setting APP_PORT 3010)"
+# The Vite proxy reads SERVER_PORT (app/vite.config.ts, default 3001). The server moved
+# to 3002 (.env SERVER_PORT), and bun in app/ loads no .env from there — so unless this
+# wrapper forwards the setting, /api through the app proxies a dead port. Same setting()
+# resolution the server wrapper uses, so the two never disagree about a port.
+SERVER_PORT="$(setting SERVER_PORT 3001)"
 
 BUN="$(command -v bun || echo "$HOME/.bun/bin/bun")"
 
@@ -33,4 +38,4 @@ BUN="$(command -v bun || echo "$HOME/.bun/bin/bun")"
 (cd "$ROOT" && "$BUN" run generate:app-config)
 
 cd app
-exec "$BUN" --bun node_modules/vite/bin/vite.js --port "$APP_PORT" --strictPort
+exec env SERVER_PORT="$SERVER_PORT" "$BUN" --bun node_modules/vite/bin/vite.js --port "$APP_PORT" --strictPort
