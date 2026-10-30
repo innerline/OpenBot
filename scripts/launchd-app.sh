@@ -38,4 +38,4 @@ BUN="$(command -v bun || echo "$HOME/.bun/bin/bun")"
 (cd "$ROOT" && "$BUN" run generate:app-config)
 
 cd app
-exec env SERVER_PORT="$SERVER_PORT" "$BUN" --bun node_modules/vite/bin/vite.js --port "$APP_PORT" --strictPort
+exec env SERVER_PORT="$SERVER_PORT" "$BUN" --bun node_modules/vite/bin/vite.js --host 127.0.0.1 --port "$APP_PORT" --strictPort
