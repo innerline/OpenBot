@@ -289,3 +289,15 @@ body {
 :where(div:has(> iframe.websandbox__frame)) {
   min-height: 200px;
 }
+
+/* [2026-10-30 owner order: "annoying bubble ... Powered by CopilotKit, get a license — fix that"]
+   Vendor license-nag suppression. The runtime HONESTLY reports licenseStatus "none" (licensed-local
+   wiring per the owner's 21:03Z order; key re-issue is the owner's one dashboard step, decision
+   pending). @copilotkit/react-core renders a fixed bottom-center banner for that state with an
+   inline style (z-index: 99999) and no class and no off-switch prop (checked 1.70.1 + 1.75.0).
+   This hides the banner only — it changes NO runtime state, and /api/copilotkit/info stays
+   truthful for the agents and the outside-call tripwire. DELETE this rule once a valid license
+   is installed or the owner rules keyless — either removes the banner naturally. */
+[style*="99999"] {
+  display: none !important;
+}
