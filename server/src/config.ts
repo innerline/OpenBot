@@ -1,17 +1,23 @@
 /**
- * What the runtime can do. There is exactly one answer because CopilotKit Intelligence is required
- * for durable threads and memory. Configuration the product cannot function without belongs at the
- * boot boundary.
+ * What the runtime can do. There are exactly two answers, selected by configuration at the boot
+ * boundary: Intelligence mode (durable threads, memory and learning on the platform) or the
+ * open-source runtime (no platform, no licence, no vendor check-in; threads live client-side and
+ * runs answer with the AG-UI event stream). Selected by runtimeCapabilities below.
  */
 import { singleUserEnabled } from "./auth/dev-actor";
 import type { ActionPolicy } from "./computer/policy";
 import { parseActionPolicy } from "./computer/policy-store";
 
-export type RuntimeCapabilities = {
-  mode: "intelligence";
-  durableHistory: true;
-  intelligence: IntelligenceSettings;
-};
+export type RuntimeCapabilities =
+  | {
+      mode: "intelligence";
+      durableHistory: true;
+      intelligence: IntelligenceSettings;
+    }
+  | {
+      mode: "oss";
+      durableHistory: false;
+    };
 
 /**
  * The Intelligence contract. Three values are required; see runtimeCapabilities.
@@ -638,6 +644,17 @@ function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
     licenseToken: optional(environment, "COPILOTKIT_LICENSE_TOKEN"),
   };
 
+  /*
+   * The empty contract selects the open-source runtime: no platform thread store, no licence
+   * token, no vendor check-in. A deployment that wants Intelligence sets all three addressing
+   * values; a deployment that sets NONE of them meant the open-source runtime (the
+   * licence-removal cutover of 2026-10-30 made that a first-class mode rather than a
+   * misconfiguration).
+   */
+  if (!settings.apiUrl && !settings.gatewayWsUrl && !settings.apiKey) {
+    return { mode: "oss", durableHistory: false };
+  }
+
   const missing = Object.entries({
     INTELLIGENCE_API_URL: settings.apiUrl,
     INTELLIGENCE_GATEWAY_WS_URL: settings.gatewayWsUrl,
@@ -648,7 +665,7 @@ function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
 
   if (missing.length > 0) {
     throw new Error(
-      `CopilotKit Intelligence is required and is not configured. Missing: ${missing.join(", ")}`,
+      `CopilotKit Intelligence is half-configured. Set all of INTELLIGENCE_API_URL, INTELLIGENCE_GATEWAY_WS_URL and INTELLIGENCE_API_KEY together, or unset all three (and COPILOTKIT_LICENSE_TOKEN) to run on the open-source runtime. Missing: ${missing.join(", ")}`,
     );
   }
 

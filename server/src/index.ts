@@ -815,25 +815,41 @@ const buildAgentFor = async ({
  * connection, but its `threads` map is per instance, and a runner per turn would fragment the
  * already-running check that keeps two turns off one thread. See `routines/run-turn.ts`.
  */
-const routineIntelligence = new CopilotKitIntelligence({
-  apiUrl: config.runtime.intelligence.apiUrl,
-  wsUrl: config.runtime.intelligence.gatewayWsUrl,
-  apiKey: config.runtime.intelligence.apiKey,
-});
-const routineAgentRunner = new IntelligenceAgentRunner({
-  url: routineIntelligence.ɵgetRunnerWsUrl(),
-  authToken: routineIntelligence.ɵgetRunnerAuthToken(),
-});
+/*
+ * Routines run headless turns through the Intelligence platform; the open-source runtime mode has
+ * no platform to run them on, so the whole pair is left unbuilt there and the routine runner is
+ * passed to createApp as absent (its parameter is optional, and its routes degrade to "nothing
+ * scheduled" rather than failing a turn).
+ */
+const inIntelligenceMode = config.runtime.mode === "intelligence";
+const intelligenceSettings =
+  config.runtime.mode === "intelligence" ? config.runtime.intelligence : undefined;
+const routineIntelligence = intelligenceSettings
+  ? new CopilotKitIntelligence({
+      apiUrl: intelligenceSettings.apiUrl,
+      wsUrl: intelligenceSettings.gatewayWsUrl,
+      apiKey: intelligenceSettings.apiKey,
+    })
+  : undefined;
+const routineAgentRunner = routineIntelligence
+  ? new IntelligenceAgentRunner({
+      url: routineIntelligence.ɵgetRunnerWsUrl(),
+      authToken: routineIntelligence.ɵgetRunnerAuthToken(),
+    })
+  : undefined;
 
-const routineRunner = createRoutineRunner({
-  routineStore,
-  channelStore,
-  runTurn: createTurnRunner({
-    intelligence: routineIntelligence,
-    runner: routineAgentRunner,
-    buildAgentFor,
-  }),
-});
+const routineRunner =
+  routineIntelligence && routineAgentRunner
+    ? createRoutineRunner({
+        routineStore,
+        channelStore,
+        runTurn: createTurnRunner({
+          intelligence: routineIntelligence,
+          runner: routineAgentRunner,
+          buildAgentFor,
+        }),
+      })
+    : undefined;
 
 /**
  * The runtime, and the two things beside it a hop needs.
@@ -981,7 +997,11 @@ const copilotRuntime = mountCopilotRuntime(
  */
 let workOfferedListener: WorkOfferedListener | undefined;
 
-if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
+if (
+  config.handoff.maxDepth > 0 &&
+  config.handoff.maxPerRun > 0 &&
+  inIntelligenceMode
+) {
   const runner = createHandoffRunner({
     queue: createWorkQueue(database),
     owner: workOwner("handoff"),
@@ -1156,6 +1176,12 @@ repeatAfterEach(
  * Naming conversations, in the API process rather than `worker/`, which the single-image container
  * does not run. Its own loop, so a slow model never delays a hop.
  */
+/*
+ * In open-source runtime mode there is no platform transcript to read, so the naming loop is
+ * left off entirely (it would warn every pass for work it cannot do) and channels keep whatever
+ * names they already have.
+ */
+if (routineIntelligence) {
 const channelSummaries = {
   database,
   queue: createWorkQueue(database),
@@ -1186,6 +1212,7 @@ repeatAfterEach(async () => {
     );
   }
 }, 10_000);
+} // end open-source-mode-off naming loop guard
 
 const app = createApp(
   config,

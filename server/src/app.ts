@@ -1372,17 +1372,16 @@ export function createApp(
     );
   }
 
-  if (threadIdentity) {
+  // The platform thread-history routes exist only in Intelligence mode: they read the platform's
+  // own thread store. In open-source runtime mode threads live client-side and there is nothing
+  // server-side to list, so the routes stay unmounted (the browser falls back to its own threads).
+  if (threadIdentity && config.runtime.mode === "intelligence") {
     app.route(
       "/api/threads",
       createThreadRoutes(
         threadIdentity,
         requireUser,
-        // config.ts refuses to boot without the full Intelligence contract (see copilot.ts's
-        // header comment), so `config.runtime.intelligence` is never missing here. Built from it
-        // rather than assumed, though: this is the one place besides the runtime mount itself that
-        // needs to reach Intelligence, and it should keep working unmodified if that guarantee ever
-        // loosens and a deployment can legitimately have no reader to build.
+        // The mode check above guarantees the contract is present in this branch.
         createThreadReader(
           createIntelligenceClient(config.runtime.intelligence),
         ),

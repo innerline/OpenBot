@@ -2001,7 +2001,14 @@ export function mountCopilotRuntime(
    */
   aguiBasePath?: string,
 ) {
-  const { intelligence } = config.runtime;
+  /*
+   * The Intelligence contract, or its absence. An empty contract (see runtimeCapabilities) boots
+   * the open-source runtime: no platform client is built, the runtime serves AG-UI streams on the
+   * response itself, and the platform seams below (locks, history, runner) degrade to local
+   * behaviour. The licence-removal cutover of 2026-10-30 runs this deployment that way.
+   */
+  const intelligence =
+    config.runtime.mode === "intelligence" ? config.runtime.intelligence : undefined;
 
   /**
    * The same Bot a person's run would get, built without a request.
@@ -2054,24 +2061,31 @@ export function mountCopilotRuntime(
   /*
    * One client, used by the runtime and by anything reading a thread beside it, so a hop reads the
    * history a person's run would read rather than a second view of it that could disagree.
+   * Absent entirely in open-source runtime mode — there is no platform to talk to.
    */
-  const intelligenceClient = new IntelligenceKnowingANewThread({
-    apiUrl: intelligence.apiUrl,
-    wsUrl: intelligence.gatewayWsUrl,
-    apiKey: intelligence.apiKey,
-  });
+  const intelligenceClient = intelligence
+    ? new IntelligenceKnowingANewThread({
+        apiUrl: intelligence.apiUrl,
+        wsUrl: intelligence.gatewayWsUrl,
+        apiKey: intelligence.apiKey,
+      })
+    : undefined;
 
-  const runtime = new CopilotRuntime({
-    // `mode` is inferred from the presence of `intelligence`; passing it is a type error.
-    //
+  /*
+   * The main runtime, in whichever of the exactly two modes the deployment configured.
+   *
+   * Two constructions rather than one with a conditional spread: the runtime's option types are a
+   * union keyed on the PRESENCE of `intelligence` (platform mode vs open-source mode), and a
+   * spread of `...(intelligence ? { intelligence } : {})` widens the property past both branches.
+   * The options both modes share are identical here by construction - the same resolver, the same
+   * telemetry, the same generative-UI switches - so only the platform client and its licence
+   * token differ.
+   */
+  const sharedRuntimeOptions = {
     // identifyUser is NOT optional in practice. Threads and memory are scoped to the user it
-    // returns, so omitting it puts every person in the deployment in the same thread space and one
-    // person's conversations become another's.
+    // returns, so omitting it puts every person in the deployment in the same thread space and
+    // one person's conversations become another's.
     identifyUser,
-    // The subclass, not the base: a thread nobody has run yet reads as empty rather than as a 500.
-    // See IntelligenceKnowingANewThread.
-    intelligence: intelligenceClient,
-    licenseToken: intelligence.licenseToken,
     // Carried on the events the runtime already sends, so OpenBot's traffic is separable from any
     // other deployment's. Adds no events of its own.
     telemetryProperties: {
@@ -2082,17 +2096,17 @@ export function mountCopilotRuntime(
      * What lets a Bot answer with an interface it wrote itself.
      *
      * This one flag is the whole difference between a Bot that draws and a Bot that describes
-     * markup it cannot show. The middleware it turns on does not give the model the tool — the
-     * browser does that — it reads the arguments of the `generateSandboxedUi` call as they stream
+     * markup it cannot show. The middleware it turns on does not give the model the tool - the
+     * browser does that - it reads the arguments of the `generateSandboxedUi` call as they stream
      * and re-emits them as `open-generative-ui` activity events. Those events are the only thing
      * that paints: the tool's own renderer shows the waiting message and then returns nothing. So a
      * deployment with the browser half and not this one has Bots generating whole interfaces that
      * never appear, which is the shape this capability arrived in.
      *
      * `true` rather than a list of Bots. The list narrows only the event transform, and the tool
-     * stays offered to every Bot regardless, so naming some Bots here would leave the others able to
-     * call it and draw nothing. Whether the capability exists at all is the switch this deployment
-     * has; see DeploymentConfig.generativeUi.
+     * stays offered to every Bot regardless, so naming some Bots here would leave the others able
+     * to call it and draw nothing. Whether the capability exists at all is the switch this
+     * deployment has; see DeploymentConfig.generativeUi.
      */
     ...(config.generativeUi ? { openGenerativeUI: true } : {}),
     // A browser catalog enables the public A2UI middleware/tool. Explicitly disable it on the
@@ -2109,10 +2123,11 @@ export function mountCopilotRuntime(
       loadToolsForActor,
       signRunForActor,
       /*
-       * Only when a computer exists. The tools themselves are registered by the surface, so a Bot is
-       * offered them without this and the guidance is what tells it how they go together: snapshot
-       * before acting, and ask a person to take the wheel at a sign-in rather than reporting the task
-       * as impossible. Absent computer, absent guidance: a Bot is not told about hands it has not got.
+       * Only when a computer exists. The tools themselves are registered by the surface, so a Bot
+       * is offered them without this and the guidance is what tells it how they go together:
+       * snapshot before acting, and ask a person to take the wheel at a sign-in rather than
+       * reporting the task as impossible. Absent computer, absent guidance: a Bot is not told
+       * about hands it has not got.
        */
       config.computer ? COMPUTER_GUIDANCE : undefined,
       loadVendors,
@@ -2123,7 +2138,21 @@ export function mountCopilotRuntime(
       loadAttachmentForActor,
       markAttachmentsSentForActor,
     ) as never,
-  });
+  };
+
+  const runtime = intelligence && intelligenceClient
+    ? new CopilotRuntime({
+        ...sharedRuntimeOptions,
+        // `mode` is inferred from the presence of `intelligence`; passing it is a type error.
+        // The subclass, not the base: a thread nobody has run yet reads as empty rather than as a
+        // 500. See IntelligenceKnowingANewThread.
+        intelligence: intelligenceClient,
+        licenseToken: intelligence.licenseToken,
+      })
+    : // In open-source runtime mode the same options serve without a platform client: runs answer
+      // with the AG-UI event stream on the response itself and threads live client-side - the
+      // shape the plain AG-UI door below has always used.
+      new CopilotRuntime({ ...sharedRuntimeOptions });
 
   /*
    * The plain AG-UI door on the same Bots, for callers that speak the protocol's HTTP shape
@@ -2191,10 +2220,18 @@ export function mountCopilotRuntime(
      * the token that holds it is not the API key. The runtime asks the client for both, so anything
      * else driving a run has to ask the same client the same way.
      */
-    runnerConnection: () => ({
-      url: intelligenceClient.ɵgetRunnerWsUrl(),
-      authToken: intelligenceClient.ɵgetRunnerAuthToken(),
-    }),
+    /*
+     * In open-source runtime mode there is no platform runner to reach; the empty connection is
+     * never dialed because the handoff machinery that would dial it is not wired in that mode
+     * (index.ts guards it the same way this file guards the client).
+     */
+    runnerConnection: () =>
+      intelligenceClient
+        ? {
+            url: intelligenceClient.ɵgetRunnerWsUrl(),
+            authToken: intelligenceClient.ɵgetRunnerAuthToken(),
+          }
+        : { url: "", authToken: "" },
     /**
      * The conversation's run lock, as the platform issues it.
      *
@@ -2213,6 +2250,14 @@ export function mountCopilotRuntime(
         userId: string;
         agentId: string;
       }) => {
+        // No platform, no lock to take: the run may proceed (an open-source-runtime thread has
+        // exactly the runs its own caller starts, so the caller is the serialization).
+        if (!intelligenceClient) {
+          try {
+            onRunBusy?.({ threadId: input.threadId, busy: true });
+          } catch {}
+          return { runId: input.runId };
+        }
         try {
           const held = await intelligenceClient.ɵacquireThreadLock(input);
           // A run started on this thread. Side effect only, never awaited: a channel showing it is
@@ -2250,6 +2295,7 @@ export function mountCopilotRuntime(
         }
       },
       renew: async (input: { threadId: string; runId: string }) => {
+        if (!intelligenceClient) return;
         await intelligenceClient.ɵrenewThreadLock({
           ...input,
           ttlSeconds: THREAD_LOCK_TTL_SECONDS,
@@ -2261,6 +2307,7 @@ export function mountCopilotRuntime(
         try {
           onRunBusy?.({ threadId: input.threadId, busy: false });
         } catch {}
+        if (!intelligenceClient) return;
         await intelligenceClient.ɵcleanupThreadLock(input);
       },
     },
@@ -2280,6 +2327,9 @@ export function mountCopilotRuntime(
       type Read = Awaited<
         ReturnType<CopilotKitIntelligence["getThreadMessages"]>
       >;
+      // No platform, no stored history: an open-source-runtime thread is replayed from the
+      // caller's own messages, so there is nothing here to read.
+      if (!intelligenceClient) return [] as Read["messages"];
       const read = await historyOrEmpty<Read>(
         () =>
           intelligenceClient.getThreadMessages({
