@@ -88,9 +88,11 @@ describe("deployment configuration", () => {
     expect(config.auth).toBeUndefined();
   });
 
-  // The product does not have a mode without Intelligence, so each of these is a refusal to boot
-  // rather than a degraded capability. Named individually because a deployment that sets three of
-  // four is the likeliest real mistake, and the message has to say which one is missing.
+  // A deployment that sets some of the Intelligence contract and not all of it meant to configure
+  // the platform and got it wrong, so each of these is a refusal to boot. Named individually
+  // because a deployment that sets three of four is the likeliest real mistake, and the message
+  // has to say which one is missing — and has to name the empty-contract escape, because that is
+  // now a first-class mode rather than a misconfiguration.
   test.each([
     "INTELLIGENCE_API_URL",
     "INTELLIGENCE_GATEWAY_WS_URL",
@@ -102,7 +104,7 @@ describe("deployment configuration", () => {
     delete environment[name];
 
     expect(() => loadConfig(environment)).toThrow(
-      `CopilotKit Intelligence is required and is not configured. Missing: ${name}`,
+      `CopilotKit Intelligence is half-configured. Set all of INTELLIGENCE_API_URL, INTELLIGENCE_GATEWAY_WS_URL and INTELLIGENCE_API_KEY together, or unset all three (and COPILOTKIT_LICENSE_TOKEN) to run on the open-source runtime. Missing: ${name}`,
     );
   });
 
@@ -137,15 +139,20 @@ describe("deployment configuration", () => {
     );
   });
 
-  test("refuses to start when Intelligence is absent entirely, rather than degrading", () => {
-    expect(() =>
-      loadConfig({
-        DATABASE_URL: baseEnvironment.DATABASE_URL,
-        KEY_ENCRYPTION_KEY: baseEnvironment.KEY_ENCRYPTION_KEY,
-        MANAGED_AGENT_AG_UI_URL: baseEnvironment.MANAGED_AGENT_AG_UI_URL,
-        MANAGED_AGENT_TOKEN: baseEnvironment.MANAGED_AGENT_TOKEN,
-      }),
-    ).toThrow("CopilotKit Intelligence is required and is not configured");
+  test("selects the open-source runtime when Intelligence is absent entirely", () => {
+    // The licence-removal cutover (2026-10-30) made the empty contract a first-class mode: no
+    // platform thread store, no licence token, no vendor check-in. It is a MODE, not a degraded
+    // Intelligence — every seam that needs the platform is guarded on it.
+    const config = loadConfig({
+      DATABASE_URL: baseEnvironment.DATABASE_URL,
+      KEY_ENCRYPTION_KEY: baseEnvironment.KEY_ENCRYPTION_KEY,
+      MANAGED_AGENT_AG_UI_URL: baseEnvironment.MANAGED_AGENT_AG_UI_URL,
+      MANAGED_AGENT_TOKEN: baseEnvironment.MANAGED_AGENT_TOKEN,
+      OPENBOT_SINGLE_USER: "true",
+    });
+
+    expect(config.runtime.mode).toBe("oss");
+    expect(config.runtime.durableHistory).toBe(false);
   });
 
   test("rejects incomplete OAuth client configuration", () => {
