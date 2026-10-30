@@ -1352,6 +1352,11 @@ const asChannelSocket = (ws: { data: SocketData }) =>
 
 serve<SocketData>({
   port,
+  // Bun's default idleTimeout is 10s; a streaming AG-UI answer whose engine
+  // is silent longer than that (cold-thread first turns run 30s+) was torn down
+  // mid-run — the "chat never answers" owner symptom. 120s matches the .env
+  // contract comment ("serves on Bun with idleTimeout: 120").
+  idleTimeout: 120,
   async fetch(request, server) {
     const url = new URL(request.url);
     const streamBotId = streamPathBotId(url.pathname);
