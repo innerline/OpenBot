@@ -5,6 +5,7 @@ import {
   BuiltInAgent,
   CopilotKitIntelligence,
   CopilotRuntime,
+  InMemoryAgentRunner,
 } from "@copilotkit/runtime/v2";
 import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
 import type { Observable } from "rxjs";
@@ -2181,6 +2182,18 @@ export function mountCopilotRuntime(
   const aguiRuntime = aguiBasePath
     ? new CopilotRuntime({
         identifyUser,
+        /**
+         * Supersede, don't throw, on a second run for a thread whose prior run
+         * is still marked running. The in-memory runner marks a thread running
+         * the moment a run starts and only clears it when that run finalizes —
+         * so a run whose client vanished mid-stream (dead socket, killed app)
+         * can leave the flag stuck ON, and every later message on that thread
+         * then dies with "Thread already running" until the process restarts.
+         * The door log showed 152 of those on this runtime. With "supersede"
+         * the new turn aborts the wedged run and takes the thread instead —
+         * the same opt-in the hosted-bot listener makes for follow-up turns.
+         */
+        runner: new InMemoryAgentRunner({ onConcurrentRun: "supersede" }),
         agents: createRequestAgents(
           identifyActor,
           loadAgents,
