@@ -1354,9 +1354,12 @@ serve<SocketData>({
   port,
   // Bun's default idleTimeout is 10s; a streaming AG-UI answer whose engine
   // is silent longer than that (cold-thread first turns run 30s+) was torn down
-  // mid-run — the "chat never answers" owner symptom. 120s matches the .env
-  // contract comment ("serves on Bun with idleTimeout: 120").
-  idleTimeout: 120,
+  // mid-run — the "chat never answers" owner symptom. 2026-11-06: raised to
+  // Bun's hard maximum (255) — a cold-SERVICE first turn on Larry's 169k-token
+  // session runs 2min+ silent, and 120s still cut it. The adapter's CUSTOM
+  // heartbeat events (every 15s of engine silence) are the primary keepalive;
+  // this ceiling is the backstop.
+  idleTimeout: 255,
   async fetch(request, server) {
     const url = new URL(request.url);
     const streamBotId = streamPathBotId(url.pathname);
